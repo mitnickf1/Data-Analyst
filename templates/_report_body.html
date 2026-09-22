@@ -7,7 +7,7 @@
       <button type="button" class="manual-tab" data-target="tab-prompt">✨ Prompt (Gemini 3.7)</button>
     </div>
 
-    <form action="{{ url_for('custom_test') }}" method="post" id="tab-manual" class="manual-panel active">
+    <form action="/custom_test" method="post" id="tab-manual" class="manual-panel active">
       <p class="manual-desc">Pilih sendiri jenis uji dan kolom yang ingin dibandingkan/diuji.</p>
       <div class="manual-grid">
         <label>Jenis Uji
@@ -37,7 +37,7 @@
       <button type="submit" class="btn-run-small">Jalankan Uji Ini →</button>
     </form>
 
-    <form action="{{ url_for('custom_test') }}" method="post" id="tab-prompt" class="manual-panel">
+    <form action="/custom_test" method="post" id="tab-prompt" class="manual-panel">
       <p class="manual-desc">
         Tulis pertanyaan atau instruksi analisis bebas, contoh: <em>"berapa rata-rata Fresh?"</em>, <em>"distribusi Milk"</em>, <em>"apakah ada outlier?"</em>, atau <em>"bandingkan Fresh berdasarkan Channel"</em>. Sistem cerdas (Gemini AI atau Autonomous Agent lokal) akan langsung menjawab dan menganalisisnya.
       </p>

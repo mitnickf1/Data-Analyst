@@ -127,11 +127,13 @@ def index():
     return render_template("index.html", css=_read_css(), js=_read_js())
 
 
-@app.route("/analyze", methods=["POST"])
-@app.route("/api/analyze", methods=["POST"])
-@app.route("/api/index/analyze", methods=["POST"])
-@app.route("/api/index.py/analyze", methods=["POST"])
+@app.route("/analyze", methods=["GET", "POST"])
+@app.route("/api/analyze", methods=["GET", "POST"])
+@app.route("/api/index/analyze", methods=["GET", "POST"])
+@app.route("/api/index.py/analyze", methods=["GET", "POST"])
 def analyze():
+    if request.method == "GET":
+        return redirect(url_for("index"))
     file = request.files.get("dataset")
     if not file or file.filename == "":
         flash("Silakan pilih file CSV atau Excel terlebih dahulu.")
@@ -166,11 +168,13 @@ def analyze():
     return _render_full_report(results, file.filename, llm_narrative, llm_error)
 
 
-@app.route("/custom_test", methods=["POST"])
-@app.route("/api/custom_test", methods=["POST"])
-@app.route("/api/index/custom_test", methods=["POST"])
-@app.route("/api/index.py/custom_test", methods=["POST"])
+@app.route("/custom_test", methods=["GET", "POST"])
+@app.route("/api/custom_test", methods=["GET", "POST"])
+@app.route("/api/index/custom_test", methods=["GET", "POST"])
+@app.route("/api/index.py/custom_test", methods=["GET", "POST"])
 def custom_test():
+    if request.method == "GET":
+        return redirect(url_for("index"))
     """
     Jalankan SATU uji statistik tambahan di atas dataset yang sudah diupload,
     dipicu secara MANUAL (dropdown) atau lewat MODE PROMPT (bahasa natural,

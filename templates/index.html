@@ -41,7 +41,7 @@
       {% endif %}
     {% endwith %}
 
-    <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data" class="upload-card" id="uploadForm">
+    <form action="/analyze" method="post" enctype="multipart/form-data" class="upload-card" id="uploadForm">
       <label for="fileInput" class="dropzone" id="dropzone">
         <div class="dropzone-icon">⤒</div>
         <p class="dropzone-text">Seret file ke sini, atau <span>klik untuk memilih</span></p>
