@@ -9,7 +9,7 @@ lalu buka http://127.0.0.1:5000 di browser.
 import os
 import uuid
 import math
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file, session, send_from_directory
 
 from eda_agent import EDAAgent
 from llm_narrator import (
@@ -62,6 +62,15 @@ def _read_css():
         return f.read()
 
 
+@app.route("/static/<path:filename>")
+@app.route("/api/static/<path:filename>")
+@app.route("/api/index/static/<path:filename>")
+@app.route("/api/index.py/static/<path:filename>")
+def serve_static(filename):
+    return send_from_directory(os.path.join(BASE_DIR, "static"), filename)
+
+
+
 def _run_llm_narrative_layer(results, form):
     """Jalankan lapisan narasi LLM opsional. Selalu fallback aman jika gagal."""
     api_key = (form.get("gemini_api_key", "") or os.environ.get("GEMINI_API_KEY", "")).strip("'\" \t\r\n")
@@ -96,11 +105,17 @@ def _render_full_report(results, filename, llm_narrative, llm_error, custom_resu
 
 
 @app.route("/", methods=["GET"])
+@app.route("/api", methods=["GET"])
+@app.route("/api/index", methods=["GET"])
+@app.route("/api/index.py", methods=["GET"])
 def index():
     return render_template("index.html")
 
 
 @app.route("/analyze", methods=["POST"])
+@app.route("/api/analyze", methods=["POST"])
+@app.route("/api/index/analyze", methods=["POST"])
+@app.route("/api/index.py/analyze", methods=["POST"])
 def analyze():
     file = request.files.get("dataset")
     if not file or file.filename == "":
@@ -137,6 +152,9 @@ def analyze():
 
 
 @app.route("/custom_test", methods=["POST"])
+@app.route("/api/custom_test", methods=["POST"])
+@app.route("/api/index/custom_test", methods=["POST"])
+@app.route("/api/index.py/custom_test", methods=["POST"])
 def custom_test():
     """
     Jalankan SATU uji statistik tambahan di atas dataset yang sudah diupload,
@@ -213,6 +231,9 @@ def custom_test():
 
 
 @app.route("/download_report")
+@app.route("/api/download_report")
+@app.route("/api/index/download_report")
+@app.route("/api/index.py/download_report")
 def download_report():
     if not LAST_RESULT_HTML["html"]:
         flash("Belum ada laporan yang bisa diunduh. Silakan jalankan analisis dulu.")
