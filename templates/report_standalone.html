@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laporan EDA — {{ filename }}</title>
+<style>
+{{ css|safe }}
+</style>
+</head>
+<body>
+<main class="report-wrap">
+  <div class="report-header">
+    <div>
+      <h1>Laporan Analisis</h1>
+      <div class="subfile">Sumber: {{ filename }}</div>
+    </div>
+  </div>
+
+  {% include "_report_body.html" %}
+</main>
+<footer class="foot">
+  <span>Dibangun dengan pandas · scipy · matplotlib · Flask — Laporan ini dihasilkan otomatis oleh Autonomous EDA Agent</span>
+</footer>
+<script>
+document.querySelectorAll('.manual-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.manual-tab').forEach((item) => item.classList.remove('active'));
+    document.querySelectorAll('.manual-panel').forEach((panel) => panel.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.target)?.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

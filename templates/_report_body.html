@@ -1,0 +1,309 @@
+<div class="section">
+  <div class="section-title">Analisis Manual &amp; Mode Prompt</div>
+
+  <div class="manual-card">
+    <div class="manual-tabs">
+      <button type="button" class="manual-tab active" data-target="tab-manual">🎛 Manual (Dropdown)</button>
+      <button type="button" class="manual-tab" data-target="tab-prompt">✨ Prompt (Gemini 3.7)</button>
+    </div>
+
+    <form action="{{ url_for('custom_test') }}" method="post" id="tab-manual" class="manual-panel active">
+      <p class="manual-desc">Pilih sendiri jenis uji dan kolom yang ingin dibandingkan/diuji.</p>
+      <div class="manual-grid">
+        <label>Jenis Uji
+          <select name="test_type">
+            <option value="auto">Otomatis (agent pilih sesuai asumsi)</option>
+            <option value="ttest">Independent t-test (2 grup)</option>
+            <option value="welch">Welch's t-test (2 grup, varians beda)</option>
+            <option value="mannwhitney">Mann-Whitney U (2 grup, non-parametrik)</option>
+            <option value="anova">One-way ANOVA (&gt;2 grup)</option>
+            <option value="kruskal">Kruskal-Wallis (&gt;2 grup, non-parametrik)</option>
+            <option value="chi2">Chi-square (kategorikal vs kategorikal)</option>
+            <option value="pearson">Pearson correlation (numerik vs numerik)</option>
+            <option value="spearman">Spearman correlation (rank, non-parametrik)</option>
+          </select>
+        </label>
+        <label>Kolom 1 <span class="hint">(grup / kategorikal)</span>
+          <select name="col1">
+            {% for c in profile.columns %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Kolom 2 <span class="hint">(numerik / kategorikal ke-2)</span>
+          <select name="col2">
+            {% for c in profile.columns %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <button type="submit" class="btn-run-small">Jalankan Uji Ini →</button>
+    </form>
+
+    <form action="{{ url_for('custom_test') }}" method="post" id="tab-prompt" class="manual-panel">
+      <p class="manual-desc">
+        Tulis pertanyaan atau instruksi analisis bebas, contoh: <em>"berapa rata-rata Fresh?"</em>, <em>"distribusi Milk"</em>, <em>"apakah ada outlier?"</em>, atau <em>"bandingkan Fresh berdasarkan Channel"</em>. Sistem cerdas (Gemini AI atau Autonomous Agent lokal) akan langsung menjawab dan menganalisisnya.
+      </p>
+      <div class="prompt-examples" aria-label="Contoh prompt">
+        {% if profile.numeric_cols %}
+          <button type="button" class="prompt-chip" data-prompt="Berapa rata-rata {{ profile.numeric_cols[0] }}?">
+            Rata-rata {{ profile.numeric_cols[0] }}
+          </button>
+          <button type="button" class="prompt-chip" data-prompt="Distribusi {{ profile.numeric_cols[0] }}">
+            Distribusi {{ profile.numeric_cols[0] }}
+          </button>
+        {% endif %}
+        {% if profile.numeric_cols|length >= 2 %}
+          <button type="button" class="prompt-chip" data-prompt="Korelasi antara {{ profile.numeric_cols[0] }} dan {{ profile.numeric_cols[1] }}">
+            Korelasi {{ profile.numeric_cols[0] }} &amp; {{ profile.numeric_cols[1] }}
+          </button>
+          <button type="button" class="prompt-chip" data-prompt="Bandingkan {{ profile.numeric_cols[0] }} dan {{ profile.numeric_cols[1] }}">
+            Bandingkan {{ profile.numeric_cols[0] }} &amp; {{ profile.numeric_cols[1] }}
+          </button>
+        {% endif %}
+        {% if profile.categorical_cols and profile.numeric_cols %}
+          <button type="button" class="prompt-chip" data-prompt="Bandingkan {{ profile.numeric_cols[0] }} berdasarkan {{ profile.categorical_cols[0] }}">
+            {{ profile.numeric_cols[0] }} per {{ profile.categorical_cols[0] }}
+          </button>
+        {% endif %}
+        <button type="button" class="prompt-chip" data-prompt="Apakah ada outlier di dataset?">
+          Deteksi Outlier
+        </button>
+        <button type="button" class="prompt-chip" data-prompt="Ringkasan dataset">
+          Ringkasan Dataset
+        </button>
+      </div>
+      <textarea name="prompt_text" id="promptText" rows="3" placeholder="Contoh: berapa rata-rata Fresh? / korelasi Fresh dan Milk / apakah ada outlier?"></textarea>
+      <div class="column-helper">
+        {% if profile.numeric_cols %}
+          <span>Numerik: {{ profile.numeric_cols|join(', ') }}</span>
+        {% endif %}
+        {% if profile.categorical_cols %}
+          <span>Kategorikal: {{ profile.categorical_cols|join(', ') }}</span>
+        {% endif %}
+      </div>
+      <input type="password" name="gemini_api_key_custom" placeholder="Gemini API key untuk Gemini 3.7 (Opsional)">
+      <button type="submit" class="btn-run-small">Jalankan Analisis →</button>
+    </form>
+  </div>
+
+  {% if custom_result %}
+  <div class="custom-result-block">
+    {% if custom_prompt_used %}
+      <p class="custom-result-prompt">💬 Prompt: "{{ custom_prompt_used }}"</p>
+    {% endif %}
+    {% if custom_result.error %}
+      <div class="llm-warning">⚠ {{ custom_result.error }}</div>
+    {% else %}
+      <h4>{{ custom_result.method }} — {{ custom_result.variables }}</h4>
+
+      {% if custom_result.metrics %}
+      <div class="stat-row">
+        {% for m in custom_result.metrics %}
+        <div class="stat-box"><span class="num">{{ m.value }}</span><span class="lab">{{ m.label }}</span></div>
+        {% endfor %}
+      </div>
+      {% elif custom_result.statistic is not none and custom_result.p_value is not none %}
+      <div class="stat-row">
+        <div class="stat-box"><span class="num">{{ custom_result.statistic|fmt4 }}</span><span class="lab">Statistik</span></div>
+        <div class="stat-box"><span class="num">{{ custom_result.p_value|fmt4 }}</span><span class="lab">p-value</span></div>
+        <div class="stat-box"><span class="num">{{ 'Ya' if custom_result.significant else 'Tidak' }}</span><span class="lab">Signifikan (α=0.05)</span></div>
+      </div>
+      {% endif %}
+
+      {% for p in custom_result.interpretation.split('\n') %}
+        {% if p.strip() %}<p>{{ p }}</p>{% endif %}
+      {% endfor %}
+
+      {% if custom_result.assumption_note %}<p class="assumption-note">{{ custom_result.assumption_note }}</p>{% endif %}
+      {% if custom_result.chart %}
+      <div class="chart-block">
+        <img src="data:image/png;base64,{{ custom_result.chart }}" alt="Grafik uji kustom">
+      </div>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Ringkasan Naratif Otomatis</div>
+
+  {% if llm_error %}
+  <div class="llm-warning">
+    ⚠ Narasi AI (Gemini) tidak dapat dibuat: {{ llm_error }}. Menampilkan narasi rule-based sebagai gantinya.
+  </div>
+  {% endif %}
+
+  {% if llm_narrative %}
+  <div class="llm-narrative-block">
+    <span class="llm-badge">Ditulis oleh Gemini</span>
+    {% for para in llm_narrative.split('\n') %}
+      {% if para.strip() %}<p>{{ para }}</p>{% endif %}
+    {% endfor %}
+  </div>
+  <details style="margin-bottom:16px;">
+    <summary style="font-family:var(--mono); font-size:11.5px; color:#8a8a7d; cursor:pointer;">
+      Lihat narasi rule-based (tanpa LLM)
+    </summary>
+    <div class="narrative-list" style="margin-top:10px;">
+      {% for line in narrative %}<p>{{ line }}</p>{% endfor %}
+    </div>
+  </details>
+  {% else %}
+  <div class="narrative-list">
+    {% for line in narrative %}
+      <p>{{ line }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Profil Dataset</div>
+  <div class="stat-row">
+    <div class="stat-box"><span class="num">{{ profile.n_rows }}</span><span class="lab">Baris</span></div>
+    <div class="stat-box"><span class="num">{{ profile.n_cols }}</span><span class="lab">Kolom</span></div>
+    <div class="stat-box"><span class="num">{{ profile.numeric_cols|length }}</span><span class="lab">Numerik</span></div>
+    <div class="stat-box"><span class="num">{{ profile.categorical_cols|length }}</span><span class="lab">Kategorikal</span></div>
+    <div class="stat-box"><span class="num">{{ profile.duplicate_rows }}</span><span class="lab">Baris Duplikat</span></div>
+    <div class="stat-box"><span class="num">{{ profile.missing|length }}</span><span class="lab">Kolom Bermasalah (Missing)</span></div>
+  </div>
+
+  {% if profile.numeric_summary %}
+  <h4 style="font-family:var(--mono); font-size:12px; text-transform:uppercase; color:#6b6b5e; margin:22px 0 8px;">Statistik Deskriptif — Numerik</h4>
+  <table class="data-table">
+    <thead><tr><th>Kolom</th><th>Mean</th><th>Median</th><th>Std</th><th>Min</th><th>Max</th><th>Skew</th></tr></thead>
+    <tbody>
+      {% for col, s in profile.numeric_summary.items() %}
+      <tr>
+        <td>{{ col }}</td><td>{{ s.mean }}</td><td>{{ s.median }}</td><td>{{ s.std }}</td>
+        <td>{{ s.min }}</td><td>{{ s.max }}</td><td>{{ s.skew }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if profile.categorical_summary %}
+  <h4 style="font-family:var(--mono); font-size:12px; text-transform:uppercase; color:#6b6b5e; margin:22px 0 8px;">Ringkasan — Kategorikal</h4>
+  <table class="data-table">
+    <thead><tr><th>Kolom</th><th>Jumlah Kategori Unik</th><th>Nilai Teratas</th></tr></thead>
+    <tbody>
+      {% for col, s in profile.categorical_summary.items() %}
+      <tr>
+        <td>{{ col }}</td>
+        <td>{{ s.n_unique }}</td>
+        <td>{{ s.top_values }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Pola Terdeteksi</div>
+  <div class="tag-list">
+    {% if patterns.constant_cols %}
+      {% for c in patterns.constant_cols %}<span class="tag warn">Konstan: {{ c }}</span>{% endfor %}
+    {% endif %}
+    {% if patterns.high_missing_cols %}
+      {% for c in patterns.high_missing_cols %}<span class="tag warn">Missing tinggi: {{ c }}</span>{% endfor %}
+    {% endif %}
+    {% for col, info in patterns.outliers.items() %}
+      <span class="tag">Outlier {{ col }}: {{ info.pct }}%</span>
+    {% endfor %}
+    {% for s in patterns.skewed_cols %}
+      <span class="tag">Skewed: {{ s.col }} ({{ s.skew }})</span>
+    {% endfor %}
+    {% if not patterns.constant_cols and not patterns.high_missing_cols and not patterns.outliers and not patterns.skewed_cols %}
+      <span class="empty-note">Tidak ada pola anomali signifikan yang terdeteksi.</span>
+    {% endif %}
+  </div>
+
+  {% if patterns.strong_correlations %}
+  <h4 style="font-family:var(--mono); font-size:12px; text-transform:uppercase; color:#6b6b5e; margin:22px 0 8px;">Korelasi Kuat (|r| ≥ 0.5)</h4>
+  <table class="data-table">
+    <thead><tr><th>Variabel 1</th><th>Variabel 2</th><th>Koefisien r</th></tr></thead>
+    <tbody>
+      {% for c in patterns.strong_correlations %}
+      <tr><td>{{ c.col1 }}</td><td>{{ c.col2 }}</td><td>{{ c.r }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Uji Statistik Otomatis</div>
+  {% if tests %}
+  <table class="data-table">
+    <thead>
+      <tr><th>Metode</th><th>Variabel</th><th>Statistik</th><th>p-value</th><th>Signifikan (α=0.05)</th></tr>
+    </thead>
+    <tbody>
+      {% for t in tests %}
+      <tr>
+        <td>{{ t.method }}</td>
+        <td>{{ t.variables }}</td>
+        <td>{{ t.statistic }}</td>
+        <td>{{ t.p_value|fmt4 }}</td>
+        <td class="{{ 'sig-yes' if t.significant else 'sig-no' }}">{{ 'Ya ✓' if t.significant else 'Tidak' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <h4 style="font-family:var(--mono); font-size:12px; text-transform:uppercase; color:#6b6b5e; margin:22px 0 8px;">Interpretasi</h4>
+  <div class="narrative-list">
+    {% for t in tests %}
+      <p>{{ t.interpretation }}</p>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-note">Tidak ditemukan kombinasi kolom yang memenuhi syarat untuk uji statistik otomatis (butuh minimal 1 kolom kategorikal dengan 2–12 kategori dan kolom numerik terkait).</p>
+  {% endif %}
+</div>
+
+<div class="section">
+  <div class="section-title">Visualisasi</div>
+
+  {% if charts.distributions %}
+  <div class="chart-block">
+    <img src="data:image/png;base64,{{ charts.distributions }}" alt="Distribusi numerik">
+    <p class="chart-caption">Distribusi setiap variabel numerik (histogram + KDE).</p>
+  </div>
+  {% endif %}
+
+  {% if charts.categorical %}
+  <div class="chart-block">
+    <img src="data:image/png;base64,{{ charts.categorical }}" alt="Frekuensi kategorikal">
+    <p class="chart-caption">Frekuensi kategori teratas untuk setiap variabel kategorikal.</p>
+  </div>
+  {% endif %}
+
+  {% if charts.correlation %}
+  <div class="chart-block">
+    <img src="data:image/png;base64,{{ charts.correlation }}" alt="Heatmap korelasi">
+    <p class="chart-caption">Matriks korelasi Pearson antar variabel numerik.</p>
+  </div>
+  {% endif %}
+
+  {% if charts.scatter_corr %}
+  <div class="chart-block">
+    <img src="data:image/png;base64,{{ charts.scatter_corr }}" alt="Scatter korelasi kuat">
+    <p class="chart-caption">Sebaran data untuk pasangan variabel dengan korelasi terkuat.</p>
+  </div>
+  {% endif %}
+
+  {% if charts.significant_groups %}
+  <div class="chart-block">
+    <img src="data:image/png;base64,{{ charts.significant_groups }}" alt="Boxplot grup signifikan">
+    <p class="chart-caption">Perbandingan distribusi untuk hasil uji grup yang signifikan secara statistik.</p>
+  </div>
+  {% endif %}
+
+  {% if charts.missing %}
+  <div class="chart-block">
+    <img src="data:image/png;base64,{{ charts.missing }}" alt="Missing value">
+    <p class="chart-caption">Proporsi data hilang per kolom.</p>
+  </div>
+  {% endif %}
+</div>

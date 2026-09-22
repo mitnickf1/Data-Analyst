@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment variables
+.env
+.env.local
+
+# Vercel deployment cache
+.vercel/
+
+# Upload directory (keep .gitkeep only)
+uploads/*
+!uploads/.gitkeep
+
+# IDE / Editor
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

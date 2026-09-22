@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Analyst Agent — Analisis Otomatis</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="grid-backdrop"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="mark">◆ DA·01</span>
+    <span class="topbar-title">Autonomous Data Analyst</span>
+  </div>
+</header>
+
+<main class="hero">
+  <div class="hero-inner">
+    <p class="eyebrow">Unggah&nbsp;→&nbsp;Deteksi&nbsp;→&nbsp;Uji&nbsp;→&nbsp;Laporan</p>
+    <h1>Kirim data mentah.<br>Terima kesimpulan statistik.</h1>
+    <p class="lede">
+      Agent ini membaca CSV atau Excel Anda, memprofilkan setiap kolom, mendeteksi
+      outlier dan korelasi, lalu memilih sendiri uji statistik yang tepat —
+      t-test, ANOVA, Mann-Whitney, Kruskal-Wallis, atau Chi-square — berdasarkan
+      hasil pengecekan asumsi (normalitas &amp; homogenitas varians).
+    </p>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="flash">
+          {% for m in messages %}<p>⚠ {{ m }}</p>{% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('analyze') }}" method="post" enctype="multipart/form-data" class="upload-card" id="uploadForm">
+      <label for="fileInput" class="dropzone" id="dropzone">
+        <div class="dropzone-icon">⤒</div>
+        <p class="dropzone-text">Seret file ke sini, atau <span>klik untuk memilih</span></p>
+        <p class="dropzone-sub">.csv · .xlsx · .xls — maks 25MB</p>
+        <input type="file" name="dataset" id="fileInput" accept=".csv,.xlsx,.xls" required>
+      </label>
+      <p class="filename-preview" id="filenamePreview"></p>
+
+      <div class="llm-toggle">
+        <button type="button" class="llm-toggle-btn" id="llmToggleBtn">
+          ✨ Aktifkan narasi AI (Gemini) — opsional
+        </button>
+        <div class="llm-key-field" id="llmKeyField">
+          <input type="password" name="gemini_api_key" id="geminiKeyInput"
+                 placeholder="Tempel Gemini API key di sini (aistudio.google.com/apikey)">
+          <p class="llm-key-note">
+            Kosongkan jika tidak ingin memakai LLM — laporan tetap dibuat dengan
+            narasi rule-based bawaan. Key tidak disimpan di server.
+          </p>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-run" id="runBtn">
+        <span>Jalankan Analisis</span>
+        <span class="btn-arrow">→</span>
+      </button>
+      <p class="loading-note" id="loadingNote">Memprofilkan data, menguji asumsi, dan menjalankan uji statistik…</p>
+    </form>
+
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <span class="pipeline-num">01</span>
+        <h3>Profil &amp; Pola</h3>
+        <p>Tipe kolom, missing value, outlier (IQR), skewness, korelasi.</p>
+      </div>
+      <div class="pipeline-step">
+        <span class="pipeline-num">02</span>
+        <h3>Uji Asumsi</h3>
+        <p>Shapiro-Wilk (normalitas) &amp; Levene (homogenitas varians) per grup.</p>
+      </div>
+      <div class="pipeline-step">
+        <span class="pipeline-num">03</span>
+        <h3>Pemilihan Uji</h3>
+        <p>t-test / Welch / Mann-Whitney / ANOVA / Kruskal-Wallis / Chi-square.</p>
+      </div>
+      <div class="pipeline-step">
+        <span class="pipeline-num">04</span>
+        <h3>Laporan</h3>
+        <p>Narasi otomatis, grafik, dan tabel hasil siap diunduh.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  <span>Dibangun dengan pandas · scipy · matplotlib · Flask</span>
+</footer>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

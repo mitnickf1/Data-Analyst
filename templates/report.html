@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laporan EDA — {{ filename }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="grid-backdrop"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="mark">◆ DA·01</span>
+    <span class="topbar-title">Autonomous Data Analyst</span>
+  </div>
+</header>
+
+<main class="report-wrap">
+  <div class="report-header">
+    <div>
+      <h1>Laporan Analisis</h1>
+      <div class="subfile">Sumber: {{ filename }}</div>
+    </div>
+    <div class="header-actions">
+      <a class="back-link" href="{{ url_for('index') }}">← Analisis Baru</a>
+      <a class="download-link" href="{{ url_for('download_report') }}">↓ Unduh Laporan HTML</a>
+    </div>
+  </div>
+
+  {% include "_report_body.html" %}
+</main>
+
+<footer class="foot">
+  <span>Dibangun dengan pandas · scipy · matplotlib · Flask</span>
+</footer>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
