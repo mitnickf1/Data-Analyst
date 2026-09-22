@@ -58,8 +58,18 @@ def allowed_file(filename):
 
 def _read_css():
     css_path = os.path.join(BASE_DIR, "static", "style.css")
-    with open(css_path, "r", encoding="utf-8") as f:
-        return f.read()
+    if os.path.exists(css_path):
+        with open(css_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
+
+
+def _read_js():
+    js_path = os.path.join(BASE_DIR, "static", "script.js")
+    if os.path.exists(js_path):
+        with open(js_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
 
 
 @app.route("/static/<path:filename>")
@@ -87,6 +97,8 @@ def _run_llm_narrative_layer(results, form):
 
 def _render_full_report(results, filename, llm_narrative, llm_error, custom_result=None,
                          custom_prompt_used=None):
+    css_content = _read_css()
+    js_content = _read_js()
     common = dict(
         filename=filename,
         profile=results["profile"],
@@ -98,9 +110,11 @@ def _render_full_report(results, filename, llm_narrative, llm_error, custom_resu
         llm_error=llm_error,
         custom_result=custom_result,
         custom_prompt_used=custom_prompt_used,
+        css=css_content,
+        js=js_content,
     )
     rendered = render_template("report.html", **common)
-    LAST_RESULT_HTML["html"] = render_template("report_standalone.html", css=_read_css(), **common)
+    LAST_RESULT_HTML["html"] = render_template("report_standalone.html", **common)
     return rendered
 
 
@@ -108,8 +122,9 @@ def _render_full_report(results, filename, llm_narrative, llm_error, custom_resu
 @app.route("/api", methods=["GET"])
 @app.route("/api/index", methods=["GET"])
 @app.route("/api/index.py", methods=["GET"])
+@app.route("/api/index.py/", methods=["GET"])
 def index():
-    return render_template("index.html")
+    return render_template("index.html", css=_read_css(), js=_read_js())
 
 
 @app.route("/analyze", methods=["POST"])
