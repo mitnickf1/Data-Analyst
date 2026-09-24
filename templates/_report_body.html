@@ -4,7 +4,7 @@
   <div class="manual-card">
     <div class="manual-tabs">
       <button type="button" class="manual-tab active" data-target="tab-manual">🎛 Manual (Dropdown)</button>
-      <button type="button" class="manual-tab" data-target="tab-prompt">✨ Prompt (Gemini 3.7)</button>
+      <button type="button" class="manual-tab" data-target="tab-prompt">✨ Prompt (Gemini AI)</button>
     </div>
 
     <form action="/custom_test" method="post" id="tab-manual" class="manual-panel active">
@@ -79,7 +79,16 @@
           <span>Kategorikal: {{ profile.categorical_cols|join(', ') }}</span>
         {% endif %}
       </div>
-      <input type="password" name="gemini_api_key_custom" placeholder="Gemini API key untuk Gemini 3.7 (Opsional)">
+      <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+        <input type="password" name="gemini_api_key_custom" value="{{ session_api_key or '' }}" placeholder="Gemini API key (Opsional)" style="flex:1;">
+        <select name="gemini_model_custom" style="padding:7px 10px; border:1px solid #d4d4d0; border-radius:6px; font-size:12px; background:white; color:#222; font-family:inherit;">
+          <option value="gemini-2.5-flash" {% if session_model == 'gemini-2.5-flash' %}selected{% endif %}>Gemini 2.5 Flash (Cepat &amp; Cerdas)</option>
+          <option value="gemini-3.5-flash-lite" {% if session_model == 'gemini-3.5-flash-lite' %}selected{% endif %}>Gemini 3.5 Flash Lite (Instan)</option>
+          <option value="gemini-2.0-flash" {% if session_model == 'gemini-2.0-flash' %}selected{% endif %}>Gemini 2.0 Flash</option>
+          <option value="gemini-1.5-flash" {% if session_model == 'gemini-1.5-flash' %}selected{% endif %}>Gemini 1.5 Flash</option>
+          <option value="gemini-1.5-pro" {% if session_model == 'gemini-1.5-pro' %}selected{% endif %}>Gemini 1.5 Pro (Mendalam)</option>
+        </select>
+      </div>
       <button type="submit" class="btn-run-small">Jalankan Analisis →</button>
     </form>
   </div>

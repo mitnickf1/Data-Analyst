@@ -5,11 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Laporan EDA — {{ filename }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-{% if css %}
-<style>
-{{ css | safe }}
-</style>
-{% endif %}
+{% if css %}<style>{{ css | safe }}</style>{% endif %}
 </head>
 <body>
 <div class="grid-backdrop"></div>

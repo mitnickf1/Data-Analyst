@@ -83,12 +83,23 @@ def serve_static(filename):
 
 def _run_llm_narrative_layer(results, form):
     """Jalankan lapisan narasi LLM opsional. Selalu fallback aman jika gagal."""
-    api_key = (form.get("gemini_api_key", "") or os.environ.get("GEMINI_API_KEY", "")).strip("'\" \t\r\n")
+    api_key = (
+        form.get("gemini_api_key", "")
+        or form.get("gemini_api_key_custom", "")
+        or session.get("gemini_api_key", "")
+        or os.environ.get("GEMINI_API_KEY", "")
+    ).strip("'\" \t\r\n")
     if not api_key:
         return None, None
+    model = (
+        form.get("gemini_model", "")
+        or form.get("gemini_model_custom", "")
+        or session.get("gemini_model", "")
+        or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    ).strip()
     try:
         narrative = generate_llm_narrative(
-            results["profile"], results["patterns"], results["tests"], api_key
+            results["profile"], results["patterns"], results["tests"], api_key, model=model
         )
         return narrative, None
     except LLMNarratorError as e:
@@ -99,6 +110,8 @@ def _render_full_report(results, filename, llm_narrative, llm_error, custom_resu
                          custom_prompt_used=None):
     css_content = _read_css()
     js_content = _read_js()
+    session_api_key = session.get("gemini_api_key", "")
+    session_model = session.get("gemini_model", os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
     common = dict(
         filename=filename,
         profile=results["profile"],
@@ -110,6 +123,8 @@ def _render_full_report(results, filename, llm_narrative, llm_error, custom_resu
         llm_error=llm_error,
         custom_result=custom_result,
         custom_prompt_used=custom_prompt_used,
+        session_api_key=session_api_key,
+        session_model=session_model,
         css=css_content,
         js=js_content,
     )
@@ -124,7 +139,8 @@ def _render_full_report(results, filename, llm_narrative, llm_error, custom_resu
 @app.route("/api/index.py", methods=["GET"])
 @app.route("/api/index.py/", methods=["GET"])
 def index():
-    return render_template("index.html", css=_read_css(), js=_read_js())
+    default_model = session.get("gemini_model", os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+    return render_template("index.html", default_model=default_model, css=_read_css(), js=_read_js())
 
 
 @app.route("/analyze", methods=["GET", "POST"])
@@ -164,6 +180,14 @@ def analyze():
     session["dataset_path"] = persistent_path
     session["dataset_filename"] = file.filename
 
+    submitted_key = request.form.get("gemini_api_key", "").strip("'\" \t\r\n")
+    if submitted_key:
+        session["gemini_api_key"] = submitted_key
+
+    submitted_model = request.form.get("gemini_model", "").strip()
+    if submitted_model:
+        session["gemini_model"] = submitted_model
+
     llm_narrative, llm_error = _run_llm_narrative_layer(results, request.form)
     return _render_full_report(results, file.filename, llm_narrative, llm_error)
 
@@ -198,10 +222,24 @@ def custom_test():
     custom_prompt_used = None
     custom_result = None
 
+    custom_key = request.form.get("gemini_api_key_custom", "").strip("'\" \t\r\n")
+    if custom_key:
+        session["gemini_api_key"] = custom_key
+
+    custom_model = request.form.get("gemini_model_custom", "").strip()
+    if custom_model:
+        session["gemini_model"] = custom_model
+
+    api_key = (
+        session.get("gemini_api_key", "")
+        or os.environ.get("GEMINI_API_KEY", "")
+    ).strip("'\" \t\r\n")
+
+    model = session.get("gemini_model", os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"))
+
     if prompt_text:
-        # --- MODE PROMPT: minta Gemini menerjemahkan instruksi jadi spesifikasi uji ---
+        # --- MODE PROMPT: minta Gemini menerjemahkan instruksi / menjawab langsung ---
         custom_prompt_used = prompt_text
-        api_key = (request.form.get("gemini_api_key_custom", "") or os.environ.get("GEMINI_API_KEY", "")).strip("'\" \t\r\n")
         column_info = {
             "numeric_cols": results["profile"]["numeric_cols"],
             "categorical_cols": results["profile"]["categorical_cols"],
@@ -215,11 +253,11 @@ def custom_test():
                 if "error" not in custom_result:
                     custom_result["assumption_note"] = (
                         (custom_result.get("assumption_note") or "")
-                        + " Analisis dijalankan secara lokal oleh Autonomous EDA Agent."
+                        + " Analisis dijalankan secara lokal oleh Autonomous EDA Agent (API key tidak diisi)."
                     ).strip()
         else:
             try:
-                spec = parse_prompt_to_spec(prompt_text, column_info, api_key)
+                spec = parse_prompt_to_spec(prompt_text, column_info, api_key, model=model)
                 if spec.get("error"):
                     custom_result = {"error": spec["error"]}
                 else:

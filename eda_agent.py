@@ -16,6 +16,7 @@ Desain: setiap keputusan statistik didasarkan pada uji asumsi terlebih dahulu
 agent ini meniru alur berpikir seorang analis data manusia.
 """
 
+import os
 import io
 import base64
 import math
@@ -46,7 +47,16 @@ def _is_finite_number(value) -> bool:
     """True jika nilai bisa dipakai sebagai angka hasil uji statistik."""
     try:
         return math.isfinite(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _is_integer_val(value) -> bool:
+    """True jika nilai merupakan bilangan bulat."""
+    try:
+        f = float(value)
+        return math.isfinite(f) and f.is_integer()
+    except (TypeError, ValueError, OverflowError):
         return False
 
 
@@ -85,23 +95,67 @@ class EDAAgent:
     # 1. LOAD & PROFILE
     # ------------------------------------------------------------------ #
     def load_data(self):
+        if not os.path.exists(self.filepath):
+            raise FileNotFoundError(f"File '{self.filepath}' tidak ditemukan.")
+        if os.path.getsize(self.filepath) == 0:
+            raise ValueError("File yang diunggah kosong (0 byte).")
+
         if self.filepath.lower().endswith((".xlsx", ".xls")):
-            self.df = pd.read_excel(self.filepath, sheet_name=self.sheet_name)
-        else:
-            # coba beberapa delimiter umum
             try:
-                self.df = pd.read_csv(self.filepath)
-            except Exception:
-                self.df = pd.read_csv(self.filepath, sep=None, engine="python")
+                self.df = pd.read_excel(self.filepath, sheet_name=self.sheet_name)
+            except Exception as e:
+                try:
+                    self.df = pd.read_excel(self.filepath, sheet_name=self.sheet_name, engine="openpyxl")
+                except Exception:
+                    raise ValueError(f"Gagal membaca file Excel: {e}")
+        else:
+            encodings = ["utf-8", "utf-8-sig", "latin-1", "cp1252", "iso-8859-1", "utf-16"]
+            loaded = False
+            last_err = None
+
+            for enc in encodings:
+                try:
+                    self.df = pd.read_csv(self.filepath, sep=None, engine="python", encoding=enc, on_bad_lines="skip")
+                    loaded = True
+                    break
+                except Exception as e:
+                    last_err = e
+                    continue
+
+            if not loaded or self.df is None:
+                for sep in [",", ";", "\t", "|"]:
+                    for enc in encodings:
+                        try:
+                            self.df = pd.read_csv(self.filepath, sep=sep, encoding=enc, on_bad_lines="skip")
+                            loaded = True
+                            break
+                        except Exception as e:
+                            last_err = e
+                            continue
+                    if loaded:
+                        break
+
+            if not loaded or self.df is None:
+                raise ValueError(f"Gagal membaca file CSV. Pastikan format teks/CSV valid. Detail: {last_err}")
+
+        if self.df is None or self.df.empty or len(self.df) == 0:
+            raise ValueError("Dataset tidak memiliki baris data (kosong).")
 
         # bersihkan nama kolom
         self.df.columns = [str(c).strip() for c in self.df.columns]
 
         # buang kolom kosong total / unnamed index bawaan Excel
         self.df = self.df.loc[:, ~self.df.columns.str.contains("^Unnamed", na=False)]
+
+        if len(self.df.columns) == 0:
+            raise ValueError("Dataset tidak memiliki kolom yang valid.")
+
         return self
 
     def _detect_column_types(self):
+        self.numeric_cols = []
+        self.categorical_cols = []
+        self.datetime_cols = []
         for col in self.df.columns:
             series = self.df[col]
             if pd.api.types.is_datetime64_any_dtype(series):
@@ -117,18 +171,27 @@ class EDAAgent:
                         parsed_ok += 1
                     except Exception:
                         pass
-                if len(sample) > 0 and parsed_ok / len(sample) > 0.8 and any(
-                    ch in col.lower() for ch in ["date", "tanggal", "waktu", "time"]
+                if len(sample) > 0 and (parsed_ok / len(sample)) > 0.8 and any(
+                    ch in str(col).lower() for ch in ["date", "tanggal", "waktu", "time"]
                 ):
                     self.datetime_cols.append(col)
                     continue
 
             if pd.api.types.is_numeric_dtype(series):
+                valid_vals = series.dropna()
                 # numerik dengan sedikit unique value & tipe int -> kemungkinan kategorikal (misal: kode grup)
-                if series.nunique(dropna=True) <= 10 and series.dropna().apply(
-                    lambda x: float(x).is_integer()
-                ).all():
-                    self.categorical_cols.append(col)
+                if len(valid_vals) > 0 and valid_vals.nunique() <= 10:
+                    is_all_int = True
+                    for x in valid_vals.head(50):
+                        if not _is_integer_val(x):
+                            is_all_int = False
+                            break
+                    if is_all_int:
+                        self.categorical_cols.append(col)
+                    else:
+                        self.numeric_cols.append(col)
+                elif len(valid_vals) == 0:
+                    self.numeric_cols.append(col)
                 else:
                     self.numeric_cols.append(col)
             else:
@@ -415,105 +478,141 @@ class EDAAgent:
         df = self.df
 
         # --- Missing value overview ---
-        missing_info = self.results["profile"]["missing"]
-        if missing_info:
-            fig, ax = plt.subplots(figsize=(7, max(2, len(missing_info) * 0.4)))
-            cols = list(missing_info.keys())
-            pcts = [missing_info[c]["pct"] for c in cols]
-            ax.barh(cols, pcts, color=ACCENT2)
-            ax.set_xlabel("% Missing")
-            ax.set_title("Kolom dengan Data Hilang")
-            charts["missing"] = _fig_to_base64(fig)
+        try:
+            missing_info = self.results["profile"].get("missing", {})
+            if missing_info:
+                fig, ax = plt.subplots(figsize=(7, max(2, len(missing_info) * 0.4)))
+                cols = list(missing_info.keys())
+                pcts = [missing_info[c]["pct"] for c in cols]
+                ax.barh(cols, pcts, color=ACCENT2)
+                ax.set_xlabel("% Missing")
+                ax.set_title("Kolom dengan Data Hilang")
+                fig.tight_layout()
+                charts["missing"] = _fig_to_base64(fig)
+        except Exception:
+            pass
 
         # --- Correlation heatmap ---
-        numeric_for_corr = self.numeric_cols[: self.MAX_NUMERIC_FOR_CORR]
-        if len(numeric_for_corr) >= 2:
-            corr = df[numeric_for_corr].corr()
-            fig, ax = plt.subplots(figsize=(max(5, len(numeric_for_corr) * 0.7),
-                                             max(4, len(numeric_for_corr) * 0.6)))
-            sns.heatmap(corr, annot=len(numeric_for_corr) <= 12, fmt=".2f", cmap="RdBu_r",
-                        center=0, ax=ax, cbar_kws={"label": "r"}, vmin=-1, vmax=1)
-            ax.set_title("Matriks Korelasi (Pearson)")
-            charts["correlation"] = _fig_to_base64(fig)
+        try:
+            numeric_for_corr = self.numeric_cols[: self.MAX_NUMERIC_FOR_CORR]
+            if len(numeric_for_corr) >= 2:
+                corr = df[numeric_for_corr].apply(pd.to_numeric, errors="coerce").corr()
+                if not corr.isna().all().all():
+                    fig, ax = plt.subplots(figsize=(max(5, len(numeric_for_corr) * 0.7),
+                                                     max(4, len(numeric_for_corr) * 0.6)))
+                    sns.heatmap(corr, annot=len(numeric_for_corr) <= 12, fmt=".2f", cmap="RdBu_r",
+                                center=0, ax=ax, cbar_kws={"label": "r"}, vmin=-1, vmax=1)
+                    ax.set_title("Matriks Korelasi (Pearson)")
+                    fig.tight_layout()
+                    charts["correlation"] = _fig_to_base64(fig)
+        except Exception:
+            pass
 
         # --- Distribusi numerik (grid histogram) ---
-        num_cols_plot = self.numeric_cols[:12]
-        if num_cols_plot:
-            n = len(num_cols_plot)
-            ncols = 3
-            nrows = int(np.ceil(n / ncols))
-            fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3 * nrows))
-            axes = np.array(axes).reshape(-1)
-            for i, col in enumerate(num_cols_plot):
-                sns.histplot(df[col].dropna(), kde=True, ax=axes[i], color=ACCENT)
-                axes[i].set_title(col, fontsize=10)
-            for j in range(len(num_cols_plot), len(axes)):
-                axes[j].axis("off")
-            fig.suptitle("Distribusi Variabel Numerik", y=1.02)
-            fig.tight_layout()
-            charts["distributions"] = _fig_to_base64(fig)
+        try:
+            num_cols_plot = self.numeric_cols[:12]
+            if num_cols_plot:
+                n = len(num_cols_plot)
+                ncols = min(3, n)
+                nrows = int(np.ceil(n / ncols))
+                fig, axes = plt.subplots(nrows, ncols, figsize=(4.2 * ncols, 3 * nrows))
+                axes = np.array(axes).reshape(-1)
+                for i, col in enumerate(num_cols_plot):
+                    s = pd.to_numeric(df[col], errors="coerce").dropna()
+                    if len(s) > 0:
+                        use_kde = bool(s.nunique() > 1 and float(s.std()) > 1e-9)
+                        sns.histplot(s, kde=use_kde, ax=axes[i], color=ACCENT)
+                        axes[i].set_title(col, fontsize=10)
+                    else:
+                        axes[i].text(0.5, 0.5, "Data kosong", ha="center", va="center")
+                for j in range(len(num_cols_plot), len(axes)):
+                    axes[j].axis("off")
+                fig.suptitle("Distribusi Variabel Numerik", y=1.02)
+                fig.tight_layout()
+                charts["distributions"] = _fig_to_base64(fig)
+        except Exception:
+            pass
 
         # --- Bar chart kategorikal ---
-        cat_cols_plot = self.categorical_cols[:8]
-        if cat_cols_plot:
-            n = len(cat_cols_plot)
-            ncols = 2
-            nrows = int(np.ceil(n / ncols))
-            fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 3 * nrows))
-            axes = np.array(axes).reshape(-1)
-            for i, col in enumerate(cat_cols_plot):
-                vc = df[col].value_counts(dropna=True).head(10)
-                axes[i].bar(vc.index.astype(str), vc.values, color=ACCENT2)
-                axes[i].set_title(col, fontsize=10)
-                axes[i].tick_params(axis="x", rotation=45, labelsize=8)
-            for j in range(len(cat_cols_plot), len(axes)):
-                axes[j].axis("off")
-            fig.suptitle("Frekuensi Variabel Kategorikal", y=1.02)
-            fig.tight_layout()
-            charts["categorical"] = _fig_to_base64(fig)
+        try:
+            cat_cols_plot = self.categorical_cols[:8]
+            if cat_cols_plot:
+                n = len(cat_cols_plot)
+                ncols = min(2, n)
+                nrows = int(np.ceil(n / ncols))
+                fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 3 * nrows))
+                axes = np.array(axes).reshape(-1)
+                for i, col in enumerate(cat_cols_plot):
+                    vc = df[col].dropna().astype(str).value_counts().head(10)
+                    if len(vc) > 0:
+                        axes[i].bar(vc.index.astype(str), vc.values, color=ACCENT2)
+                        axes[i].set_title(col, fontsize=10)
+                        axes[i].tick_params(axis="x", rotation=45, labelsize=8)
+                    else:
+                        axes[i].text(0.5, 0.5, "Data kosong", ha="center", va="center")
+                for j in range(len(cat_cols_plot), len(axes)):
+                    axes[j].axis("off")
+                fig.suptitle("Frekuensi Variabel Kategorikal", y=1.02)
+                fig.tight_layout()
+                charts["categorical"] = _fig_to_base64(fig)
+        except Exception:
+            pass
 
         # --- Boxplot untuk uji grup yang signifikan (top 6) ---
-        sig_group_tests = [t for t in self.results["tests"]
-                            if t["type"] == "group_comparison" and t["significant"]][:6]
-        if sig_group_tests:
-            n = len(sig_group_tests)
-            ncols = 2
-            nrows = int(np.ceil(n / ncols))
-            fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 3.5 * nrows))
-            axes = np.array(axes).reshape(-1)
-            for i, t in enumerate(sig_group_tests):
-                sub = df[[t["cat_col"], t["num_col"]]].dropna()
-                sns.boxplot(data=sub, x=t["cat_col"], y=t["num_col"], ax=axes[i],
-                            palette="Set2")
-                axes[i].set_title(f"{t['num_col']} vs {t['cat_col']} (p={t['p_value']:.4f})",
-                                   fontsize=9)
-                axes[i].tick_params(axis="x", rotation=30, labelsize=8)
-            for j in range(len(sig_group_tests), len(axes)):
-                axes[j].axis("off")
-            fig.suptitle("Perbandingan Grup Signifikan", y=1.02)
-            fig.tight_layout()
-            charts["significant_groups"] = _fig_to_base64(fig)
+        try:
+            sig_group_tests = [t for t in self.results["tests"]
+                                if t.get("type") == "group_comparison" and t.get("significant")][:6]
+            if sig_group_tests:
+                n = len(sig_group_tests)
+                ncols = min(2, n)
+                nrows = int(np.ceil(n / ncols))
+                fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 3.5 * nrows))
+                axes = np.array(axes).reshape(-1)
+                for i, t in enumerate(sig_group_tests):
+                    sub = df[[t["cat_col"], t["num_col"]]].dropna()
+                    sub[t["num_col"]] = pd.to_numeric(sub[t["num_col"]], errors="coerce")
+                    sub = sub.dropna()
+                    if len(sub) > 0:
+                        sns.boxplot(data=sub, x=t["cat_col"], y=t["num_col"], ax=axes[i],
+                                    palette="Set2")
+                        axes[i].set_title(f"{t['num_col']} vs {t['cat_col']} (p={t['p_value']:.4f})",
+                                           fontsize=9)
+                        axes[i].tick_params(axis="x", rotation=30, labelsize=8)
+                for j in range(len(sig_group_tests), len(axes)):
+                    axes[j].axis("off")
+                fig.suptitle("Perbandingan Grup Signifikan", y=1.02)
+                fig.tight_layout()
+                charts["significant_groups"] = _fig_to_base64(fig)
+        except Exception:
+            pass
 
         # --- Scatter untuk korelasi kuat (top 4) ---
-        top_corr = self.results["patterns"]["strong_correlations"][:4]
-        if top_corr:
-            n = len(top_corr)
-            ncols = 2
-            nrows = int(np.ceil(n / ncols))
-            fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
-            axes = np.array(axes).reshape(-1)
-            for i, pair in enumerate(top_corr):
-                sub = df[[pair["col1"], pair["col2"]]].dropna()
-                axes[i].scatter(sub[pair["col1"]], sub[pair["col2"]], alpha=0.5,
-                                 color=ACCENT, edgecolor="white", linewidth=0.3)
-                axes[i].set_xlabel(pair["col1"])
-                axes[i].set_ylabel(pair["col2"])
-                axes[i].set_title(f"r = {pair['r']}", fontsize=10)
-            for j in range(len(top_corr), len(axes)):
-                axes[j].axis("off")
-            fig.suptitle("Hubungan Antar Variabel Berkorelasi Kuat", y=1.02)
-            fig.tight_layout()
-            charts["scatter_corr"] = _fig_to_base64(fig)
+        try:
+            top_corr = self.results["patterns"].get("strong_correlations", [])[:4]
+            if top_corr:
+                n = len(top_corr)
+                ncols = min(2, n)
+                nrows = int(np.ceil(n / ncols))
+                fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows))
+                axes = np.array(axes).reshape(-1)
+                for i, pair in enumerate(top_corr):
+                    sub = df[[pair["col1"], pair["col2"]]].dropna()
+                    s1 = pd.to_numeric(sub[pair["col1"]], errors="coerce")
+                    s2 = pd.to_numeric(sub[pair["col2"]], errors="coerce")
+                    valid = ~(s1.isna() | s2.isna())
+                    if valid.sum() > 0:
+                        axes[i].scatter(s1[valid], s2[valid], alpha=0.5,
+                                         color=ACCENT, edgecolor="white", linewidth=0.3)
+                        axes[i].set_xlabel(pair["col1"])
+                        axes[i].set_ylabel(pair["col2"])
+                        axes[i].set_title(f"r = {pair['r']}", fontsize=10)
+                for j in range(len(top_corr), len(axes)):
+                    axes[j].axis("off")
+                fig.suptitle("Hubungan Antar Variabel Berkorelasi Kuat", y=1.02)
+                fig.tight_layout()
+                charts["scatter_corr"] = _fig_to_base64(fig)
+        except Exception:
+            pass
 
         self.results["charts"] = charts
         return self
@@ -617,8 +716,22 @@ class EDAAgent:
         col2 = spec.get("col2")
 
         try:
-            # 1. Analisis dataset-wide (tidak wajib kolom)
-            if test == "dataset_overview":
+            # 1. Analisis dataset-wide & direct answer
+            if test == "direct_answer":
+                return {
+                    "method": spec.get("method") or "Jawaban Analisis AI",
+                    "variables": spec.get("variables") or "Pertanyaan Pengguna",
+                    "statistic": None,
+                    "p_value": None,
+                    "significant": None,
+                    "metrics": spec.get("metrics") or [{"label": "Fokus", "value": "Insight Kritis"}],
+                    "interpretation": spec.get("answer") or spec.get("interpretation") or "Analisis selesai.",
+                    "assumption_note": spec.get("note") or "Dianalisis secara cerdas oleh AI berdasarkan dataset Anda.",
+                    "chart": None,
+                }
+            elif test == "top_finding":
+                return self._run_custom_top_finding()
+            elif test == "dataset_overview":
                 return self._run_custom_dataset_overview()
             elif test == "missing_values":
                 return self._run_custom_missing_values(col1)
@@ -1347,6 +1460,45 @@ class EDAAgent:
             "assumption_note": "Dihasilkan secara otomatis dari profil statistik, deteksi anomali, dan uji inferensial agent.",
             "chart": None,
         }
+
+    def _run_custom_top_finding(self) -> dict:
+        sig_tests = [t for t in self.results.get("tests", []) if t.get("significant")]
+        top_corr = self.results.get("patterns", {}).get("strong_correlations", [])
+        outliers = self.results.get("patterns", {}).get("outliers", {})
+
+        if sig_tests:
+            top_t = sig_tests[0]
+            metrics = [
+                {"label": "Uji Signifikan", "value": top_t["method"]},
+                {"label": "Variabel Kunci", "value": top_t["variables"]},
+                {"label": "p-value", "value": f"{top_t['p_value']:.4e}"},
+            ]
+            interpretation = (
+                f"**1 Temuan Statistik Paling Penting pada Dataset:**\n\n"
+                f"Terdapat perbedaan atau korelasi yang sangat nyata secara statistik pada **{top_t['variables']}** "
+                f"menggunakan metode uji inferensial **{top_t['method']}** (p-value = {top_t['p_value']:.4e} < 0.05).\n\n"
+                f"{top_t['interpretation']}\n\n"
+                f"Temuan ini menunjukkan bahwa variabel ini merupakan faktor pembeda atau pendorong paling kuat di dalam dataset Anda."
+            )
+            return {
+                "method": f"1 Temuan Kritis Utama — {top_t['method']}",
+                "variables": top_t["variables"],
+                "statistic": top_t.get("statistic"),
+                "p_value": top_t.get("p_value"),
+                "significant": True,
+                "metrics": metrics,
+                "interpretation": interpretation,
+                "assumption_note": "Diekstraksi dari hasil uji inferensial dengan tingkat signifikansi statistik tertinggi.",
+                "chart": None,
+            }
+        elif top_corr:
+            c1, c2 = top_corr[0]["col1"], top_corr[0]["col2"]
+            return self._run_custom_numeric_compare(c1, c2)
+        elif outliers:
+            top_col = sorted(outliers.items(), key=lambda x: -x[1]["pct"])[0]
+            return self._run_custom_column_stats(top_col[0])
+        else:
+            return self._run_custom_dataset_summary()
 
     # ------------------------------------------------------------------ #
     # ORCHESTRATOR

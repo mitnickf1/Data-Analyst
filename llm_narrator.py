@@ -15,17 +15,22 @@ Endpoint: Gemini Interactions API (generativelanguage.googleapis.com), model def
 'gemini-3.7-flash'.
 """
 
+import os
 import json
 import re
 import difflib
-import json
-import re
 import requests
 
-GEMINI_MODEL_DEFAULT = "gemini-2.5-flash"
-GEMINI_MODEL_FALLBACKS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.7-flash"]
+GEMINI_MODEL_DEFAULT = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL_FALLBACKS = [
+    "gemini-2.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+]
 GEMINI_INTERACTIONS_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
-REQUEST_TIMEOUT = 12  # detik per percobaan (agar tidak membeku terlalu lama)
+REQUEST_TIMEOUT = 15  # detik per percobaan
 
 
 class LLMNarratorError(Exception):
@@ -81,7 +86,10 @@ Panjang maksimal sekitar 300-400 kata."""
 
 
 def _extract_interaction_text(data: dict) -> str:
-    """Ambil teks dari respons Interactions API, dengan fallback format generateContent lama."""
+    """Ambil teks dari respons Google Gemini API."""
+    if not isinstance(data, dict):
+        return ""
+
     for key in ("output_text", "outputText"):
         text = data.get(key)
         if isinstance(text, str) and text.strip():
@@ -94,46 +102,55 @@ def _extract_interaction_text(data: dict) -> str:
             if isinstance(text, str) and text.strip():
                 return text.strip()
 
+    candidates = data.get("candidates", [])
+    if candidates and isinstance(candidates, list):
+        parts = candidates[0].get("content", {}).get("parts", [])
+        text = "".join(p.get("text", "") for p in parts if isinstance(p, dict)).strip()
+        if text:
+            return text
+
     steps = data.get("steps", [])
     if isinstance(steps, list):
         for step in reversed(steps):
-            if not isinstance(step, dict) or step.get("type") != "model_output":
-                continue
-            content = step.get("content", [])
-            if not isinstance(content, list):
-                continue
-            text = "".join(
-                item.get("text", "")
-                for item in content
-                if isinstance(item, dict) and item.get("type") == "text"
-            ).strip()
-            if text:
-                return text
-
-    candidates = data.get("candidates", [])
-    if candidates:
-        parts = candidates[0].get("content", {}).get("parts", [])
-        text = "".join(p.get("text", "") for p in parts).strip()
-        if text:
-            return text
+            if isinstance(step, dict) and step.get("type") == "model_output":
+                content = step.get("content", [])
+                if isinstance(content, list):
+                    text = "".join(
+                        item.get("text", "")
+                        for item in content
+                        if isinstance(item, dict) and item.get("type") == "text"
+                    ).strip()
+                    if text:
+                        return text
 
     return ""
 
 
 def _extract_json_object(text: str) -> dict:
-    """Parse JSON langsung, atau ambil objek JSON pertama dari output model."""
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
+    """Parse JSON langsung, atau ekstrak objek JSON dari output model."""
+    text = str(text).strip()
+    # Bersihkan markdown code block jika ada
+    if "```" in text:
+        m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+        if m:
+            text = m.group(1).strip()
+        else:
+            text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+            text = re.sub(r"\s*```$", "", text).strip()
 
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
-            raise
-        return json.loads(match.group(0))
+        # Coba ambil karakter pertama '{' hingga '}' terluar
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            snippet = text[start : end + 1]
+            try:
+                return json.loads(snippet)
+            except json.JSONDecodeError:
+                pass
+        raise LLMNarratorError(f"Format keluaran model bukan JSON valid: {text[:150]}")
 
 
 def _extract_google_error(resp: requests.Response) -> str:
@@ -155,87 +172,46 @@ def _extract_google_error(resp: requests.Response) -> str:
 
 def _post_gemini(model: str, prompt: str, api_key: str, *, json_output=False) -> str:
     """
-    Panggil Gemini API dengan endpoint universal generateContent,
-    dengan fallback ke Interactions API bila diperlukan.
+    Panggil Gemini API dengan endpoint universal generateContent.
     Mengembalikan teks respons atau melempar LLMNarratorError dengan pesan jelas.
     """
-    api_key = str(api_key).strip("'\" \t\r\n")
+    api_key = str(api_key or "").strip("'\" \t\r\n")
     if not api_key:
         raise LLMNarratorError("API key Gemini tidak boleh kosong.")
 
-    last_err = None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+    generation_config = {
+        "maxOutputTokens": 1024 if not json_output else 512,
+        "temperature": 0.2,
+    }
 
-    # 1. Coba endpoint universal generateContent (didukung oleh semua versi Gemini & akun Google AI Studio)
+    body = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": generation_config,
+    }
+
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        }
-        generation_config = {
-            "maxOutputTokens": 1024 if not json_output else 512,
-            "temperature": 0.2,
-        }
-        if json_output:
-            generation_config["responseMimeType"] = "application/json"
-
-        body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": generation_config,
-        }
-
         resp = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
         if resp.status_code == 200:
             txt = _extract_interaction_text(resp.json())
             if txt:
                 return txt
-            else:
-                last_err = LLMNarratorError(f"Gemini ({model}) berhasil dihubungi namun tidak menghasilkan teks respons.")
+            raise LLMNarratorError(f"Gemini ({model}) berhasil dihubungi namun tidak mengembalikan teks.")
         else:
             err_detail = _extract_google_error(resp)
-            # Jika API key salah / ditolak, langsung hentikan agar user tahu segera tanpa menunggu model lain
             if resp.status_code in (400, 401, 403) and any(
                 kw in err_detail.lower() for kw in ["api key", "api_key", "identity", "unregistered", "invalid_argument"]
             ):
-                raise LLMNarratorError(f"API key Gemini tidak valid atau ditolak: {err_detail}. Silakan periksa kembali API key Anda di Google AI Studio.")
+                raise LLMNarratorError(f"API key Gemini tidak valid: {err_detail}")
             if resp.status_code == 429:
-                raise LLMNarratorError(f"Kuota atau batas kecepatan (rate limit) Gemini API terlampaui: {err_detail}")
-            last_err = LLMNarratorError(f"Gemini API ({model}) HTTP {resp.status_code}: {err_detail}")
+                raise LLMNarratorError(f"Batas kuota Gemini API terlampaui: {err_detail}")
+            raise LLMNarratorError(f"Gemini API ({model}) HTTP {resp.status_code}: {err_detail}")
     except requests.exceptions.RequestException as e:
-        last_err = LLMNarratorError(f"Gagal menghubungi Gemini API ({model}): {e}")
-
-    # 2. Coba Interactions API jika model Gemini 3.x / 2.5
-    if model.startswith("gemini-3") or model.startswith("gemini-2.5"):
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "x-goog-api-key": api_key,
-            }
-            body = {
-                "model": model,
-                "input": prompt,
-                "generation_config": {
-                    "max_output_tokens": 1024 if not json_output else 512,
-                    "thinking_level": "low",
-                },
-            }
-            resp = requests.post(GEMINI_INTERACTIONS_ENDPOINT, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
-            if resp.status_code == 200:
-                txt = _extract_interaction_text(resp.json())
-                if txt:
-                    return txt
-            else:
-                err_detail = _extract_google_error(resp)
-                if resp.status_code in (400, 401, 403) and any(
-                    kw in err_detail.lower() for kw in ["api key", "api_key", "identity", "unregistered"]
-                ):
-                    raise LLMNarratorError(f"API key Gemini tidak valid: {err_detail}")
-        except requests.exceptions.RequestException:
-            pass
-
-    if last_err:
-        raise last_err
-    raise LLMNarratorError(f"Gemini API ({model}) tidak mengembalikan respons teks.")
+        raise LLMNarratorError(f"Gagal menghubungi Gemini API ({model}): {e}")
 
 
 def generate_llm_narrative(profile: dict, patterns: dict, tests: list,
@@ -271,7 +247,7 @@ VALID_TESTS = [
     "chi2", "pearson", "spearman", "auto",
     "column_stats", "distribution", "normality", "category_stats",
     "numeric_compare", "dataset_overview", "missing_values",
-    "outlier_report", "top_correlations", "dataset_summary",
+    "outlier_report", "top_correlations", "top_finding", "dataset_summary",
     "direct_answer",
 ]
 
@@ -357,6 +333,14 @@ def parse_prompt_locally(user_prompt: str, column_info: dict) -> dict:
     categorical_cols = column_info.get("categorical_cols", [])
 
     mentioned_numeric, mentioned_categorical = match_columns_in_prompt(prompt, numeric_cols, categorical_cols)
+
+    # 0. Pertanyaan "1 data penting" / "temuan penting" / "rekomendasi"
+    if any(w in prompt for w in [
+        "1 data penting", "satu data penting", "data penting", "temuan penting",
+        "hal terpenting", "faktor penting", "yang paling penting", "insight penting",
+        "rekomendasi utama", "temuan utama", "insight utama"
+    ]):
+        return {"test": "top_finding", "col1": None, "col2": None, "error": None}
 
     # 1. Dataset overview / Dimensi data
     if any(w in prompt for w in [
@@ -484,36 +468,22 @@ def parse_prompt_locally(user_prompt: str, column_info: dict) -> dict:
 
 
 def _build_prompt_spec_instruction(user_prompt: str, column_info: dict) -> str:
-    return f"""Kamu adalah parser instruksi analisis data cerdas. Pengguna menulis permintaan
-dalam bahasa natural tentang data atau uji statistik yang ingin dijalankan pada dataset.
-Tugasmu HANYA mengubah instruksi itu menjadi JSON terstruktur {{"test": "...", "col1": "...", "col2": "...", "error": null}}.
+    return f"""Kamu adalah asisten analis data cerdas. Pengguna menulis pertanyaan atau instruksi analisis:
+"{user_prompt}"
 
-Kolom yang tersedia di dataset ini:
-- Kolom numerik: {column_info['numeric_cols']}
-- Kolom kategorikal: {column_info['categorical_cols']}
+Kolom yang tersedia di dataset:
+- Numerik: {column_info.get('numeric_cols', [])}
+- Kategorikal: {column_info.get('categorical_cols', [])}
 
-Instruksi pengguna: "{user_prompt}"
+PILIH SALAH SATU FORMAT RESPON JSON BERIKUT:
 
-Pilih SALAH SATU nilai "test" berikut:
-- "column_stats": statistik deskriptif 1 kolom numerik (rata-rata/mean, median, min, max, total/sum, std) -> col1=nama kolom, col2="mean"|"median"|"min"|"max"|"sum"|"std"|"all"
-- "distribution" atau "normality": uji normalitas / bentuk sebaran data -> col1=nama kolom numerik
-- "category_stats": frekuensi / breakdown kategori -> col1=nama kolom kategorikal
-- "numeric_compare": membandingkan 2 kolom numerik -> col1 dan col2 = kolom numerik
-- "ttest"/"welch"/"mannwhitney"/"anova"/"kruskal"/"auto": perbandingan nilai numerik antar grup kategorikal -> col1=kolom kategorikal, col2=kolom numerik
-- "chi2": uji asosiasi antara dua variabel kategorikal -> col1 dan col2 = kolom kategorikal
-- "pearson"/"spearman": korelasi antara dua variabel numerik -> col1 dan col2 = kolom numerik
-- "dataset_overview": jumlah baris, kolom, dimensi data
-- "missing_values": pertanyaan tentang data kosong/missing
-- "outlier_report": pertanyaan tentang outlier/pencilan
-- "top_correlations": korelasi terkuat/tertinggi
-- "dataset_summary": ringkasan umum / kesimpulan / insight dataset
+1. Jika pengguna meminta uji statistik, grafik, atau komparasi tertentu (misal: "korelasi Fresh dan Milk", "rata-rata Milk", "distribusi Channel", "outlier"):
+   {{"test": "column_stats"|"distribution"|"normality"|"category_stats"|"numeric_compare"|"ttest"|"anova"|"chi2"|"pearson"|"outlier_report"|"missing_values"|"top_correlations"|"top_finding"|"dataset_summary", "col1": "nama_kolom", "col2": "nama_kolom_atau_null", "error": null}}
 
-Aturan:
-- Nama kolom HARUS persis sama dengan salah satu kolom yang tersedia di atas (atau null jika tidak spesifik).
-- Jika instruksi tidak jelas, isi "error" dengan pesan ramah, atau pilih "dataset_summary".
+2. Jika pengguna meminta penjelasan naratif, insight khusus, interpretasi bisnis, atau pertanyaan terbuka (contoh: "jelaskan 1 data penting", "mengapa data demikian", "apa strategi terbaik"):
+   {{"test": "direct_answer", "method": "Jawaban Analisis AI Cerdas", "variables": "{user_prompt}", "answer": "<Tuliskan penjelasan analitis yang tajam, mendalam, dan langsung menjawab pertanyaan pengguna secara to-the-point>", "metrics": [{{"label": "Fokus", "value": "Temuan Kritis"}}], "error": null}}
 
-Jawab HANYA dengan JSON valid persis:
-{{"test": "...", "col1": "...", "col2": "...", "error": null}}"""
+Jawab HANYA dengan format JSON valid persis."""
 
 
 def parse_prompt_to_spec(user_prompt: str, column_info: dict, api_key: str,

@@ -5,11 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Data Analyst Agent — Analisis Otomatis</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-{% if css %}
-<style>
-{{ css | safe }}
-</style>
-{% endif %}
+{% if css %}<style>{{ css | safe }}</style>{% endif %}
 </head>
 <body>
 
@@ -55,6 +51,13 @@
           ✨ Aktifkan narasi AI (Gemini) — opsional
         </button>
         <div class="llm-key-field" id="llmKeyField">
+          <select name="gemini_model" id="geminiModelSelect" style="margin-bottom:8px; padding:10px 12px; border:1px solid #d4d4d0; border-radius:6px; width:100%; font-size:13px; background:white; color:#222; font-family:inherit;">
+            <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (Rekomendasi - Cerdas &amp; Cepat)</option>
+            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Versi Ringan &amp; Instan)</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+            <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+            <option value="gemini-1.5-pro">Gemini 1.5 Pro (Analisis Sangat Mendalam)</option>
+          </select>
           <input type="password" name="gemini_api_key" id="geminiKeyInput"
                  placeholder="Tempel Gemini API key di sini (aistudio.google.com/apikey)">
           <p class="llm-key-note">
